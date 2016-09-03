@@ -63,7 +63,7 @@ int make_packet(char* buf, int buffsize, int *n_seq, FILE *fin) {
 
 int main(int argc, char **argv){
 
-	if(argc != 10){
+	if(argc != 9){
 		die("args");
 	}
 
@@ -72,7 +72,7 @@ int main(int argc, char **argv){
 		die("fopen");
 	}
 
-//	int mws = atoi(argv[4]);
+	int mws = atoi(argv[4]);
 	int mss = atoi(argv[5]);
 	int timeout = atoi(argv[6]) * 1000;
 
@@ -95,27 +95,45 @@ int main(int argc, char **argv){
 		die("inet_aton");
 	}
 
-	//queue<char*> q;
+	std::queue<char*> q;//, wait;
 	int seq = 0;
 
-	while(make_packet(buf, buffsize, &seq, fin)){
+//	while(make_packet(buf, buffsize, &seq, fin)){
+//		char *tmp = (char*)malloc(sizeof(buffsize));
+//		wait.push(tmp);
+//	}
 
-		if(trysend(s, buf, sizeof(header) + ((Header)buf)->len, (sockaddr*)&si_other, slen) == -1){
-			die("sendto");
+	while(!q.empty() || !feof(fin)){//(q.count >= mss && (buf = q.front())) ||  || !q.empty()){
+
+		while((int)q.size() < mws && make_packet(buf, buffsize, &seq, fin)){
+			q.push((char*)memcpy(malloc(buffsize), buf, buffsize));
+			
+			if(trysend(s, buf, sizeof(header) + ((Header)buf)->len, (sockaddr*)&si_other, slen) == -1){
+				die("sendto");
+			}
 		}
-		
-		int n = tryrecv(s, buf, buffsize, (sockaddr*)&si_other, &slen, timeout);
+
+		int n;
+		n = tryrecv(s, buf, buffsize, (sockaddr*)&si_other, &slen, timeout);
 		if(n == -2){
+			if(trysend(s, q.front(), sizeof(header) + ((Header)q.front())->len, (sockaddr*)&si_other, slen) == -1){
+				die("sendto");
+			}
 			printf("timeout\n");
 			continue;
 		}
 		else if(n == -1){
 			die("tryrecv");
 		}
+		else{
 
-		printf("Received packet from %s:%d\n", inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
-		printf("%s\n", buf + sizeof(header));
-		fflush(stdout);
+			printf("Received packet from %s:%d\n", inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
+			printf("%s\n", buf + sizeof(header));
+			fflush(stdout);
+
+			q.pop();
+			free(q.front());
+		}
 
 	}
 

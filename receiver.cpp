@@ -8,6 +8,9 @@
 #include <arpa/inet.h>
 //#include <netinet/in.h>
 
+#include <map>
+#include <string>
+
 #include "header.h"
 
 #define BUFFER 1000
@@ -15,14 +18,14 @@
 typedef struct sockaddr_in sockaddr_in;
 typedef struct sockaddr sockaddr;
 
-void die(char *s){
-	perror(s);
+void die(std::string s){
+	perror(s.c_str());
 	exit(1);
 }
 
 int main(int argc, char **argv){
 
-	if(argc != 2){
+	if(argc != 3){
 		die("args");
 	}
 
@@ -30,6 +33,8 @@ int main(int argc, char **argv){
 
 	int s, slen = sizeof(si_other), recv_len;
 	char buf[BUFFER];
+	
+	FILE *fout = fopen(argv[2], "w");
 
 	if((s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1){
 		die("socket");
@@ -45,25 +50,29 @@ int main(int argc, char **argv){
 		die("bind");
 	}
 
+	//int seq = 0;
+	std::map<int, char*> save;
 
 	while(1){
-		printf("waiting...\n");
-		fflush(stdout);
 
+		memset(buf, 0, BUFFER);
 		if((recv_len = recvfrom(s, buf, BUFFER, 0, (sockaddr*) &si_other, &slen)) == -1){
 			die("recvfrom");
 		}
-		buf[recv_len] = 0;
 
-		printf("Received packet from %s:%d\n", inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
+		printf("Received packet #%d from %s:%d\n", ((Header)buf)->n_seq, inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
+		
+
         printf("Data: %s\n", buf + sizeof(header));
-		usleep(100000);
 
 		if(sendto(s, buf, recv_len, 0, (sockaddr*)&si_other, slen) == -1){
 			die("sendto");
 		}
+		fflush(stdout);
 	}
+
 	close(s);
+	fclose(fout);
 
 	return 0;
 }
