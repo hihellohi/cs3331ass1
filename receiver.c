@@ -6,7 +6,9 @@
 #include <netdb.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
-#include <netinet/in.h>
+//#include <netinet/in.h>
+
+#include "header.h"
 
 #define BUFFER 1000
 
@@ -54,7 +56,7 @@ int main(int argc, char **argv){
 		buf[recv_len] = 0;
 
 		printf("Received packet from %s:%d\n", inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
-        printf("Data: %s\n" , buf);
+        printf("Data: %s\n", buf + sizeof(header));
 		usleep(100000);
 
 		if(sendto(s, buf, recv_len, 0, (sockaddr*)&si_other, slen) == -1){
