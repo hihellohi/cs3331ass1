@@ -72,7 +72,7 @@ int main(int argc, char **argv){
 	while(1){
 
 		memset(buf, 0, BUFFER);
-		if((recv_len = recvfrom(s, buf, BUFFER, 0, (sockaddr*) &si_other, &slen)) == -1){
+		if((recv_len = recvfrom(s, buf, BUFFER, 0, (sockaddr*) &si_other, (unsigned int*)&slen)) == -1){
 			die("recvfrom");
 		}
 
