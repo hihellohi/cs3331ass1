@@ -91,7 +91,7 @@ int main(int argc, char **argv){
 			std::map<unsigned int, char*>::iterator it = save.end();
 
 			do{
-				fprintf(fout, "%s", tmp + sizeof(header));
+				fwrite(tmp + sizeof(header), sizeof(char), ((Header)tmp)->len, fout);
 				seq += ((Header)tmp)->len;
 
 				if(it != save.end()){
