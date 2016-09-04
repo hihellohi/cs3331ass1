@@ -64,8 +64,9 @@ int main(int argc, char **argv){
 		std::pair<unsigned int, char*>,
 		std::vector<std::pair<unsigned int, char*> >,
 		std::greater<std::pair<unsigned int, char*> > > save;
+	bool finished = false;
 
-	while(1){
+	while(!finished){
 
 		memset(buf, 0, BUFFER);
 		if((recv_len = recvfrom(s, buf, BUFFER, 0, (sockaddr*) &si_other, &slen)) == -1){
@@ -84,7 +85,7 @@ int main(int argc, char **argv){
 			save.push(std::make_pair( ((Header)buf)->n_seq, (char*)memcpy(malloc(recv_len), buf, recv_len)));
 		}
 
-		else{
+		else if(((Header)buf)->flags & 1 << DATA){
 			fwrite(buf + sizeof(header), sizeof(char), ((Header)buf)->len, fout);
 			seq += ((Header)buf)->len;
 
@@ -94,6 +95,9 @@ int main(int argc, char **argv){
 				free(save.top().second);
 				save.pop();
 			}
+		}else if(((Header)buf)->flags & 1 << FIN && ((Header)buf)->n_seq == seq){
+			finished = true;
+			seq++;
 		}
 
 		make_ack(buf, seq);

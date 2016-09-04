@@ -49,7 +49,7 @@ int trysend(int s, char *buf, int buffsize, sockaddr *si_target, int slen){
 	return sendto(s, buf, buffsize, 0, si_target, slen);
 }
 
-int make_packet(char* buf, int buffsize, int *n_seq, FILE *fin) {
+int make_packet(char* buf, int buffsize, unsigned int *n_seq, FILE *fin) {
 
 	memset(buf, 0, buffsize);
 
@@ -59,7 +59,6 @@ int make_packet(char* buf, int buffsize, int *n_seq, FILE *fin) {
 	((Header)buf)->flags = (1 << DATA);
 	return 1;
 }
-
 
 int main(int argc, char **argv){
 
@@ -79,6 +78,7 @@ int main(int argc, char **argv){
 	sockaddr_in si_other;
 
 	int s, slen = sizeof(si_other);
+	int n;
 	int buffsize = (sizeof(header) + mss);
 	char *buf = (char*)malloc(buffsize);
 
@@ -95,40 +95,26 @@ int main(int argc, char **argv){
 		die("inet_aton");
 	}
 
-	std::queue<char*> q;//, wait;
-	int seq = 0;
+	std::queue<char*> q;
+	unsigned int seq = 0;
 
-//	while(make_packet(buf, buffsize, &seq, fin)){
-//		char *tmp = (char*)malloc(sizeof(buffsize));
-//		wait.push(tmp);
-//	}
-
-	while(!q.empty() || !feof(fin)){//(q.count >= mss && (buf = q.front())) ||  || !q.empty()){
+	while(!q.empty() || !feof(fin)){
 
 		while((int)q.size() < mws && make_packet(buf, buffsize, &seq, fin)){
 			q.push((char*)memcpy(malloc(buffsize), buf, buffsize));
 			
 			printf("sending packet #%u\n", ((Header)buf)->n_seq);
-			if(trysend(s, buf, sizeof(header) + ((Header)buf)->len, (sockaddr*)&si_other, slen) == -1){
-				die("sendto");
-			}
+			trysend(s, buf, sizeof(header) + ((Header)buf)->len, (sockaddr*)&si_other, slen);
 		}
 
-		int n;
 		n = tryrecv(s, buf, buffsize, (sockaddr*)&si_other, &slen, timeout);
 		if(n == -2){
 			printf("resending packet #%u\n", ((Header)q.front())->n_seq);
-			if(trysend(s, q.front(), sizeof(header) + ((Header)q.front())->len, (sockaddr*)&si_other, slen) == -1){
-				die("sendto");
-			}
+			trysend(s, q.front(), sizeof(header) + ((Header)q.front())->len, (sockaddr*)&si_other, slen);
 			printf("timeout\n");
 			continue;
 		}
-		else if(n == -1){
-			die("tryrecv");
-		}
-		else{
-
+		else if(((Header)buf)->flags & (1 << ACK)){
 			printf("Received ACK #%u from %s:%d\n", ((Header)buf)->n_ack, inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
 
 			while(!q.empty() && ((Header)buf)->n_ack > ((Header)q.front())->n_seq){
@@ -139,6 +125,15 @@ int main(int argc, char **argv){
 			fflush(stdout);
 		}
 	}
+
+	do{
+		memset(buf, 0, buffsize);
+		((Header)buf)->n_seq = seq;
+		((Header)buf)->flags = 1 << FIN;
+
+		trysend(s, buf, sizeof(header), (sockaddr*)&si_other, slen);
+		n = tryrecv(s, buf, buffsize, (sockaddr*)&si_other, &slen, timeout);
+	}while(!(n != -2 && ((Header)buf)->n_ack == seq + 1 && ((Header)buf)->flags & (1 << ACK)));
 
 	close(s);
 	fclose(fin);
