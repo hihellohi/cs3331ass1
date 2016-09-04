@@ -8,7 +8,9 @@
 #include <arpa/inet.h>
 //#include <netinet/in.h>
 
-#include <map>
+#include <queue>
+#include <vector>
+#include <utility>
 #include <string>
 
 #include "header.h"
@@ -23,15 +25,6 @@ void die(std::string s){
 	exit(1);
 }
 
-char* tryget(std::map<unsigned int, char*> m, unsigned int key, std::map<unsigned int, char*>::iterator *it) {
-	*it = m.find(key);
-	if (*it == m.end()){
-		return NULL;
-	}
-	else{
-		return (*it)->second;
-	}
-}
 
 void make_ack(char *buf, unsigned int seq){
 	memset(buf, 0, BUFFER);
@@ -67,12 +60,15 @@ int main(int argc, char **argv){
 	}
 
 	unsigned int seq = 0;
-	std::map<unsigned int, char*> save;
+	std::priority_queue<
+		std::pair<unsigned int, char*>,
+		std::vector<std::pair<unsigned int, char*> >,
+		std::greater<std::pair<unsigned int, char*> > > save;
 
 	while(1){
 
 		memset(buf, 0, BUFFER);
-		if((recv_len = recvfrom(s, buf, BUFFER, 0, (sockaddr*) &si_other, (unsigned int*)&slen)) == -1){
+		if((recv_len = recvfrom(s, buf, BUFFER, 0, (sockaddr*) &si_other, &slen)) == -1){
 			die("recvfrom");
 		}
 
@@ -82,24 +78,24 @@ int main(int argc, char **argv){
 			printf("sequence # eclipsed!\n");
 			continue;
 		}
+
 		else if(((Header)buf)->n_seq > seq){
 			printf("out of sequence packet - caching...\n");
-			save[((Header)buf)->n_seq] = (char*)memcpy(malloc(recv_len), buf, recv_len);
+			save.push(std::make_pair( ((Header)buf)->n_seq, (char*)memcpy(malloc(recv_len), buf, recv_len)));
 		}
+
 		else{
-			char *tmp = buf;
-			std::map<unsigned int, char*>::iterator it = save.end();
+			fwrite(buf + sizeof(header), sizeof(char), ((Header)buf)->len, fout);
+			seq += ((Header)buf)->len;
 
-			do{
-				fwrite(tmp + sizeof(header), sizeof(char), ((Header)tmp)->len, fout);
-				seq += ((Header)tmp)->len;
-
-				if(it != save.end()){
-					save.erase(it);
-					//free(it->second);
-				}
-			}while((tmp = tryget(save, seq, &it)));
+			while(!save.empty() && save.top().first == seq){
+				fwrite(save.top().second + sizeof(header), sizeof(char), ((Header)save.top().second)->len, fout);
+				seq += ((Header)save.top().second)->len;
+				free(save.top().second);
+				save.pop();
+			}
 		}
+
 		make_ack(buf, seq);
 
         printf("Sending ACK #%u\n", ((Header)buf)->n_ack);
