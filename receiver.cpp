@@ -23,6 +23,22 @@ void die(std::string s){
 	exit(1);
 }
 
+char* tryget(std::map<unsigned int, char*> m, unsigned int key, std::map<unsigned int, char*>::iterator *it) {
+	*it = m.find(key);
+	if (*it == m.end()){
+		return NULL;
+	}
+	else{
+		return (*it)->second;
+	}
+}
+
+void make_ack(char *buf, unsigned int seq){
+	memset(buf, 0, BUFFER);
+	((Header)buf)->n_ack = seq;
+	((Header)buf)->flags = 1 << ACK;
+}
+
 int main(int argc, char **argv){
 
 	if(argc != 3){
@@ -50,8 +66,8 @@ int main(int argc, char **argv){
 		die("bind");
 	}
 
-	//int seq = 0;
-	std::map<int, char*> save;
+	unsigned int seq = 0;
+	std::map<unsigned int, char*> save;
 
 	while(1){
 
@@ -60,15 +76,40 @@ int main(int argc, char **argv){
 			die("recvfrom");
 		}
 
-		printf("Received packet #%d from %s:%d\n", ((Header)buf)->n_seq, inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
+		printf("Received packet #%u from %s:%d\n", ((Header)buf)->n_seq, inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
 		
+		if(((Header)buf)->n_seq < seq){
+			printf("sequence # eclipsed!");
+			continue;
+		}
+		else if(((Header)buf)->n_seq > seq){
+			printf("out of sequence packet - caching...");
+			save[((Header)buf)->n_seq] = (char*)memcpy(malloc(recv_len), buf, recv_len);
+		}
+		else{
+			char *tmp = buf;
+			std::map<unsigned int, char*>::iterator it = save.end();
 
-        printf("Data: %s\n", buf + sizeof(header));
+			do{
+				fprintf(fout, "%s", tmp + sizeof(header));
+				seq += ((Header)tmp)->len;
 
-		if(sendto(s, buf, recv_len, 0, (sockaddr*)&si_other, slen) == -1){
+				if(it != save.end()){
+					save.erase(it);
+					free(it->second);
+				}
+			}while((tmp = tryget(save, seq, &it)));
+		}
+		make_ack(buf, seq);
+
+        printf("Sending ACK #%u\n", ((Header)buf)->n_ack);
+
+		if(sendto(s, buf, sizeof(header), 0, (sockaddr*)&si_other, slen) == -1){
 			die("sendto");
 		}
+
 		fflush(stdout);
+		fflush(fout);
 	}
 
 	close(s);
