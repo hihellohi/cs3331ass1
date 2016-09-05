@@ -42,7 +42,7 @@ int tryrecv(int s, char *buf, int bufsize, sockaddr *si_target, int *slen, int u
 
 	memset(buf, 0, bufsize);
 
-	return recvfrom(s, buf, bufsize, 0, si_target, slen);
+	return recvfrom(s, buf, bufsize, 0, si_target, (unsigned int*)slen);
 }
 
 int trysend(int s, char *buf, int buffsize, sockaddr *si_target, int slen){
