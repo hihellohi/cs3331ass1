@@ -16,10 +16,55 @@
 #include "header.h"
 
 static double dropchance;
+static FILE *fout;
+static timeval global;
 
 void die(std::string s){
 	perror(s.c_str());
 	exit(1);
+}
+
+void set_timer(timeval *tv){
+	gettimeofday(tv, 0);
+}
+
+int get_timer(timeval *tv){
+	timeval tmp;
+	gettimeofday(&tmp, 0);
+	int now = tmp.tv_sec * 1000 + tmp.tv_usec / 1000;
+	int before = tv->tv_sec * 1000 + tv->tv_usec / 1000;
+	int out = now - before;
+	if(out < 0){
+		out += 24 * 3600000;
+	}
+	return out;
+}
+
+void LogPacket(char *buf, std::string type){
+	char flags[5];
+	int tmp = 0;
+
+	if(((Header)buf)->flags & 1 << SYN){
+		flags[tmp++] = 'S';
+	}
+	if(((Header)buf)->flags & 1 << FIN){
+		flags[tmp++] = 'F';
+	}
+	if(((Header)buf)->flags & 1 << DATA){
+		flags[tmp++] = 'D';
+	}
+	if(((Header)buf)->flags & 1 << ACK){
+		flags[tmp++] = 'A';
+	}
+	flags[tmp] = 0;
+
+	fprintf(fout, "%s \t%d\t%s\t%u\t%u\t%u\n", 
+			type.c_str(),
+			get_timer(&global), 
+			flags, 
+			((Header)buf)->n_seq, 
+			((Header)buf)->len, 
+			((Header)buf)->n_ack);
 }
 
 int tryrecv(int s, char *buf, int bufsize, sockaddr *si_target, int *slen, int us){
@@ -41,15 +86,23 @@ int tryrecv(int s, char *buf, int bufsize, sockaddr *si_target, int *slen, int u
 	}
 
 	memset(buf, 0, bufsize);
+	n = recvfrom(s, buf, bufsize, 0, si_target, slen);
+	LogPacket(buf, "rcv");
 
-	return recvfrom(s, buf, bufsize, 0, si_target, slen);
+	return n;
 }
 
 int trysend(int s, char *buf, int buffsize, sockaddr *si_target, int slen){
+
 	printf("sending packet #%u\n", ((Header)buf)->n_seq);
 	if(rand()/(((double)RAND_MAX + 1)) > dropchance){
+		LogPacket(buf, "snd");
 		sendto(s, buf, buffsize, 0, si_target, slen);
 	}
+	else {
+		LogPacket(buf, "drop");
+	}
+
 	return buffsize;
 }
 
@@ -64,22 +117,6 @@ int make_packet(char* buf, int buffsize, unsigned int *n_seq, FILE *fin) {
 	return 1;
 }
 
-void set_timer(timeval *tv){
-	gettimeofday(tv, 0);
-}
-
-int get_timer(timeval *tv){
-	timeval tmp;
-	gettimeofday(&tmp, 0);
-	int now = tmp.tv_sec * 1000 + tmp.tv_usec / 1000;
-	int before = tv->tv_sec * 1000 + tv->tv_usec / 1000;
-	int out = now - before;
-	if(out < 0){
-		out += 24 * 3600000;
-	}
-	return out;
-}
-
 int main(int argc, char **argv){
 
 	if(argc != 9){
@@ -87,9 +124,12 @@ int main(int argc, char **argv){
 	}
 
 	FILE *fin = fopen(argv[3], "r");
+	fout = fopen("Sender_log.txt", "w");
 	if(!fin){
 		die("fopen");
 	}
+
+	set_timer(&global);
 
 	int mws = atoi(argv[4]);
 	int mss = atoi(argv[5]);

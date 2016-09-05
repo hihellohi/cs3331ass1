@@ -6,12 +6,8 @@
 #include <netdb.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
-//#include <netinet/in.h>
 
-//#include <queue>
 #include <map>
-#include <vector>
-#include <utility>
 #include <string>
 
 #include "header.h"
@@ -61,10 +57,6 @@ int main(int argc, char **argv){
 	}
 
 	unsigned int seq = 0;
-//	std::priority_queue<
-//		std::pair<unsigned int, char*>,
-//		std::vector<std::pair<unsigned int, char*> >,
-//		std::greater<std::pair<unsigned int, char*> > > save;
 	std::map<unsigned int, char*> save;
 	bool finished = false;
 
@@ -84,7 +76,6 @@ int main(int argc, char **argv){
 
 		else if(((Header)buf)->n_seq > seq){
 			printf("out of sequence packet - caching...\n");
-			//save.push(std::make_pair( ((Header)buf)->n_seq, (char*)memcpy(malloc(recv_len), buf, recv_len)));
 			save[((Header)buf)->n_seq] = (char*)memcpy(malloc(recv_len), buf, recv_len);
 		}
 
@@ -92,17 +83,12 @@ int main(int argc, char **argv){
 			fwrite(buf + sizeof(header), sizeof(char), ((Header)buf)->len, fout);
 			seq += ((Header)buf)->len;
 
-			//while(!save.empty() && save.top().first == seq){
 			std::map<unsigned int, char*>::iterator it;
 			while((it = save.find(seq)) != save.end()){
-				//fwrite(save.top().second + sizeof(header), sizeof(char), ((Header)save.top().second)->len, fout);
 				fwrite(it->second + sizeof(header), sizeof(char), ((Header)it->second)->len, fout);
-				//seq += ((Header)save.top().second)->len;
 				seq += ((Header)it->second)->len;
 				free(it->second);
 				save.erase(it);
-				//free(save.top().second);
-				//save.pop();
 			}
 		}else if(((Header)buf)->flags & 1 << FIN && ((Header)buf)->n_seq == seq){
 			finished = true;
