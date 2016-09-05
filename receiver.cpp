@@ -99,8 +99,8 @@ int main(int argc, char **argv){
 				fwrite(it->second + sizeof(header), sizeof(char), ((Header)it->second)->len, fout);
 				//seq += ((Header)save.top().second)->len;
 				seq += ((Header)it->second)->len;
-				save.erase(it);
 				free(it->second);
+				save.erase(it);
 				//free(save.top().second);
 				//save.pop();
 			}
