@@ -7,7 +7,6 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <arpa/inet.h>
-//#include <netinet/in.h>
 
 #include <queue>
 #include <string>
@@ -58,7 +57,7 @@ void LogPacket(char *buf, std::string type){
 	}
 	flags[tmp] = 0;
 
-	fprintf(fout, "%s \t%d\t%s\t%u\t%u\t%u\n", 
+	fprintf(fout, "%s\t%d\t%s\t%u\t%u\t%u\n", 
 			type.c_str(),
 			get_timer(&global), 
 			flags, 
@@ -106,12 +105,13 @@ int trysend(int s, char *buf, int buffsize, sockaddr *si_target, int slen){
 	return buffsize;
 }
 
-int make_packet(char* buf, int buffsize, unsigned int *n_seq, FILE *fin) {
+int make_packet(char* buf, int buffsize, unsigned int *n_seq, unsigned int ack, FILE *fin) {
 
 	memset(buf, 0, buffsize);
 
 	if(!(((Header)buf)->len = fread(buf + sizeof(header), 1, buffsize - sizeof(header), fin))) return 0;
 	((Header)buf)->n_seq = *n_seq;
+	((Header)buf)->n_ack = ack;
 	*n_seq += ((Header)buf)->len;
 	((Header)buf)->flags = (1 << DATA);
 	return 1;
@@ -158,14 +158,14 @@ int main(int argc, char **argv){
 	}
 
 	std::queue<char*> q;
-	unsigned int seq = 0;
+	unsigned int seq = 0, ack = 0;
 
 	timeval timer;
 	int fast = 0;
 
 	while(!q.empty() || !feof(fin)){
 
-		while((int)q.size() < mws && make_packet(buf, buffsize, &seq, fin)){
+		while((int)q.size() < mws && make_packet(buf, buffsize, &seq, ack, fin)){
 			q.push((char*)memcpy(malloc(buffsize), buf, buffsize));
 			
 			trysend(s, buf, sizeof(header) + ((Header)buf)->len, (sockaddr*)&si_other, slen);
@@ -189,6 +189,7 @@ int main(int argc, char **argv){
 					((Header)buf)->n_ack, 
 					inet_ntoa(si_other.sin_addr), 
 					ntohs(si_other.sin_port));
+			ack = ((Header)buf)->n_seq + 1;
 
 			if(!q.empty() && ((Header)buf)->n_ack == ((Header)q.front())->n_seq){
 				if(++fast == 3){
@@ -212,14 +213,22 @@ int main(int argc, char **argv){
 		}
 	}
 
-	do{
-		memset(buf, 0, buffsize);
-		((Header)buf)->n_seq = seq;
-		((Header)buf)->flags = 1 << FIN;
+	dropchance = -1;
 
-		trysend(s, buf, sizeof(header), (sockaddr*)&si_other, slen);
-		n = tryrecv(s, buf, buffsize, (sockaddr*)&si_other, &slen, timeout);
-	}while(!(n != -2 && ((Header)buf)->n_ack == seq + 1 && ((Header)buf)->flags & (1 << ACK)));
+	memset(buf, 0, buffsize);
+	((Header)buf)->n_ack = ack;
+	((Header)buf)->n_seq = seq++;
+	((Header)buf)->flags = 1 << FIN;
+
+	trysend(s, buf, sizeof(header), (sockaddr*)&si_other, slen);
+	n = tryrecv(s, buf, buffsize, (sockaddr*)&si_other, &slen, RAND_MAX);
+
+	memset(buf, 0, buffsize);
+	((Header)buf)->n_ack = ack++;
+	((Header)buf)->n_seq = seq;
+	((Header)buf)->flags = 1 << ACK;
+
+	trysend(s, buf, sizeof(header), (sockaddr*)&si_other, slen);
 
 	close(s);
 	fclose(fin);

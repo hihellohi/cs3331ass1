@@ -23,10 +23,14 @@ void die(std::string s){
 }
 
 
-void make_ack(char *buf, unsigned int seq){
+void make_ack(char *buf, unsigned int ack, unsigned int seq, bool finished){
 	memset(buf, 0, BUFFER);
-	((Header)buf)->n_ack = seq;
+	((Header)buf)->n_ack = ack;
+	((Header)buf)->n_seq = seq;
 	((Header)buf)->flags = 1 << ACK;
+	if(finished){
+		((Header)buf)->flags |= 1 << FIN;
+	}
 }
 
 int main(int argc, char **argv){
@@ -56,46 +60,45 @@ int main(int argc, char **argv){
 		die("bind");
 	}
 
-	unsigned int seq = 0;
+	unsigned int ack = 0, seq = 0;
 	std::map<unsigned int, char*> save;
 	bool finished = false;
 
 	while(!finished){
 
 		memset(buf, 0, BUFFER);
-		if((recv_len = recvfrom(s, buf, BUFFER, 0, (sockaddr*) &si_other, &slen)) == -1){
-			die("recvfrom");
-		}
+		recv_len = recvfrom(s, buf, BUFFER, 0, (sockaddr*) &si_other, &slen);
 
 		printf("Received packet #%u from %s:%d\n", ((Header)buf)->n_seq, inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
 		
-		if(((Header)buf)->n_seq < seq){
+		if(((Header)buf)->n_seq < ack){
 			printf("sequence # eclipsed!\n");
 			continue;
 		}
 
-		else if(((Header)buf)->n_seq > seq){
+		else if(((Header)buf)->n_seq > ack){
 			printf("out of sequence packet - caching...\n");
 			save[((Header)buf)->n_seq] = (char*)memcpy(malloc(recv_len), buf, recv_len);
 		}
 
 		else if(((Header)buf)->flags & 1 << DATA){
 			fwrite(buf + sizeof(header), sizeof(char), ((Header)buf)->len, fout);
-			seq += ((Header)buf)->len;
+			ack += ((Header)buf)->len;
 
 			std::map<unsigned int, char*>::iterator it;
-			while((it = save.find(seq)) != save.end()){
+			while((it = save.find(ack)) != save.end()){
 				fwrite(it->second + sizeof(header), sizeof(char), ((Header)it->second)->len, fout);
-				seq += ((Header)it->second)->len;
+				ack += ((Header)it->second)->len;
 				free(it->second);
 				save.erase(it);
 			}
-		}else if(((Header)buf)->flags & 1 << FIN && ((Header)buf)->n_seq == seq){
+		}else if(((Header)buf)->flags & 1 << FIN && ((Header)buf)->n_seq == ack){
 			finished = true;
 			seq++;
+			ack++;
 		}
 
-		make_ack(buf, seq);
+		make_ack(buf, ack, seq, finished);
 
         printf("Sending ACK #%u\n", ((Header)buf)->n_ack);
 
