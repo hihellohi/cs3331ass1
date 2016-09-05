@@ -46,6 +46,7 @@ int tryrecv(int s, char *buf, int bufsize, sockaddr *si_target, int *slen, int u
 }
 
 int trysend(int s, char *buf, int buffsize, sockaddr *si_target, int slen){
+	printf("sending packet #%u\n", ((Header)buf)->n_seq);
 	if(rand()/(((double)RAND_MAX + 1)) > dropchance){
 		sendto(s, buf, buffsize, 0, si_target, slen);
 	}
@@ -127,7 +128,6 @@ int main(int argc, char **argv){
 		while((int)q.size() < mws && make_packet(buf, buffsize, &seq, fin)){
 			q.push((char*)memcpy(malloc(buffsize), buf, buffsize));
 			
-			printf("sending packet #%u\n", ((Header)buf)->n_seq);
 			trysend(s, buf, sizeof(header) + ((Header)buf)->len, (sockaddr*)&si_other, slen);
 
 			if(q.size() == 1){
@@ -139,7 +139,6 @@ int main(int argc, char **argv){
 		if(n == -2){
 
 			printf("timeout\n");
-			printf("resending packet #%u\n", ((Header)q.front())->n_seq);
 			trysend(s, q.front(), sizeof(header) + ((Header)q.front())->len, (sockaddr*)&si_other, slen);
 
 			set_timer(&timer);
@@ -152,12 +151,11 @@ int main(int argc, char **argv){
 					ntohs(si_other.sin_port));
 
 			if(!q.empty() && ((Header)buf)->n_ack == ((Header)q.front())->n_seq){
-				if(++fast > 2){
-					fast = 0;
+				if(++fast == 3){
 
 					printf("preemptive timeout\n");
-					printf("resending packet #%u\n", ((Header)q.front())->n_seq);
 					trysend(s, q.front(), sizeof(header) + ((Header)q.front())->len, (sockaddr*)&si_other, slen);
+
 					set_timer(&timer);
 				}
 			}
