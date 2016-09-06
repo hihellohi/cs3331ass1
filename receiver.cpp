@@ -12,7 +12,7 @@
 
 #include "header.h"
 
-#define BUFFER 1000
+#define BUFFER sizeof(header)
 
 typedef struct sockaddr_in sockaddr_in;
 typedef struct sockaddr sockaddr;
@@ -38,11 +38,12 @@ int main(int argc, char **argv){
 	if(argc != 3){
 		die("args");
 	}
+	srand(time(NULL));
 
 	sockaddr_in si_me, si_other;
 
 	int s, slen = sizeof(si_other), recv_len;
-	char buf[BUFFER];
+	char* buf = (char*)malloc(BUFFER);
 	
 	FILE *fout = fopen(argv[2], "w");
 
@@ -60,14 +61,32 @@ int main(int argc, char **argv){
 		die("bind");
 	}
 
-	unsigned int ack = 0, seq = 0;
+	unsigned int ack = 0, seq = rand();
+	unsigned int win, buffsize;
+
+	recvfrom(s, buf, BUFFER, 0, (sockaddr*) &si_other, &slen);
+	ack = ((Header)buf)->n_seq + 1;
+	buffsize = ((Header)buf)->n_ack + BUFFER;
+	win = ((Header)buf)->size;
+	win++;
+
+	free(buf);
+	buf = (char*)malloc(buffsize);
+
+	memset(buf, 0, buffsize);
+	((Header)buf)->n_ack = ack;
+	((Header)buf)->n_seq = seq;
+	((Header)buf)->flags = 1 << SYN | 1 << ACK;
+
+	sendto(s, buf, sizeof(header), 0, (sockaddr*)&si_other, slen);
+
 	std::map<unsigned int, char*> save;
 	bool finished = false;
 
 	while(!finished){
 
-		memset(buf, 0, BUFFER);
-		recv_len = recvfrom(s, buf, BUFFER, 0, (sockaddr*) &si_other, &slen);
+		memset(buf, 0, buffsize);
+		recv_len = recvfrom(s, buf, buffsize, 0, (sockaddr*) &si_other, &slen);
 
 		printf("Received packet #%u from %s:%d\n", ((Header)buf)->n_seq, inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
 		

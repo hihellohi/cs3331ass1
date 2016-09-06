@@ -9,5 +9,6 @@ typedef struct _header{
 	unsigned int n_seq;
 	unsigned int n_ack;
 	unsigned int len;
+	unsigned int size;
 	char flags;
 } header;
