@@ -163,6 +163,7 @@ int main(int argc, char **argv){
 	dropchance = -1;
 	unsigned int seq = rand(), ack = 0;
 
+	memset(buf, 0, buffsize);
 	((Header)buf)->n_ack = mss;
 	((Header)buf)->n_seq = seq++;
 	((Header)buf)->size = mss * mws; 	
@@ -251,6 +252,7 @@ int main(int argc, char **argv){
 
 	close(s);
 	fclose(fin);
+	fclose(fout);
 	free(buf);
 
 	return 0;

@@ -68,7 +68,6 @@ int main(int argc, char **argv){
 	ack = ((Header)buf)->n_seq + 1;
 	buffsize = ((Header)buf)->n_ack + BUFFER;
 	win = ((Header)buf)->size;
-	win++;
 
 	free(buf);
 	buf = (char*)malloc(buffsize);
@@ -111,7 +110,7 @@ int main(int argc, char **argv){
 				free(it->second);
 				save.erase(it);
 			}
-		}else if(((Header)buf)->flags & 1 << FIN && ((Header)buf)->n_seq == ack){
+		}else if(((Header)buf)->flags & 1 << FIN){
 			finished = true;
 			seq++;
 			ack++;
@@ -131,6 +130,7 @@ int main(int argc, char **argv){
 
 	close(s);
 	fclose(fout);
+	free(buf);
 
 	return 0;
 }
