@@ -89,12 +89,12 @@ int main(int argc, char **argv){
 
 		printf("Received packet #%u from %s:%d\n", ((Header)buf)->n_seq, inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
 		
-		if(((Header)buf)->n_seq < ack){
+		if(((Header)buf)->n_seq - ack > win){
 			printf("sequence # eclipsed!\n");
 			continue;
 		}
 
-		else if(((Header)buf)->n_seq > ack){
+		else if(((Header)buf)->n_seq != ack){
 			printf("out of sequence packet - caching...\n");
 			save[((Header)buf)->n_seq] = (char*)memcpy(malloc(recv_len), buf, recv_len);
 		}
@@ -114,6 +114,8 @@ int main(int argc, char **argv){
 			finished = true;
 			seq++;
 			ack++;
+		}else if(((Header)buf)->flags & 1 << ACK){
+			continue;
 		}
 
 		make_ack(buf, ack, seq, finished);

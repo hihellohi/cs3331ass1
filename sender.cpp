@@ -135,8 +135,8 @@ int main(int argc, char **argv){
 
 	set_timer(&global);
 
-	int mws = atoi(argv[4]);
-	int mss = atoi(argv[5]);
+	unsigned int mws = atoi(argv[4]);
+	unsigned int mss = atoi(argv[5]);
 	int timeout = atoi(argv[6]) * 1000;
 	srand(atoi(argv[8]));
 
@@ -189,7 +189,7 @@ int main(int argc, char **argv){
 
 	while(!q.empty() || !feof(fin)){
 
-		while((int)q.size() < mws && make_packet(buf, buffsize, &seq, ack, fin)){
+		while(q.size() < mws && make_packet(buf, buffsize, &seq, ack, fin)){
 			q.push((char*)memcpy(malloc(buffsize), buf, buffsize));
 			
 			trysend(s, buf, sizeof(header) + ((Header)buf)->len, (sockaddr*)&si_other, slen);
@@ -200,7 +200,7 @@ int main(int argc, char **argv){
 		}
 
 		n = tryrecv(s, buf, buffsize, &si_other, std::max(0, timeout - get_timer(&timer)));
-		if(n == -2){
+		if(n == -2 && !q.empty()){
 
 			printf("timeout\n");
 			trysend(s, q.front(), sizeof(header) + ((Header)q.front())->len, (sockaddr*)&si_other, slen);
@@ -220,7 +220,7 @@ int main(int argc, char **argv){
 				}
 			}
 
-			while(!q.empty() && ((Header)buf)->n_ack > ((Header)q.front())->n_seq){
+			while(!q.empty() && ((Header)buf)->n_ack - ((Header)q.front())->n_seq - 1 < mss * mws){
 				fast = 0;
 				set_timer(&timer);
 
@@ -229,6 +229,7 @@ int main(int argc, char **argv){
 			}
 
 			fflush(stdout);
+			fflush(fout);
 		}
 	}
 
