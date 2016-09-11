@@ -20,6 +20,10 @@ typedef struct sockaddr sockaddr;
 
 static timeval global;
 
+static int total_data;
+static int total_segments;
+static int total_duplicates;
+
 FILE *flog;
 
 void die(std::string s){
@@ -79,6 +83,9 @@ int tryrecv(int s, char *buf, int bufsize, sockaddr_in *si_target, int *slen){
 			((Header)buf)->n_seq, 
 			inet_ntoa(si_target->sin_addr), 
 			ntohs(si_target->sin_port));
+
+	total_segments++;
+	total_data += ((Header)buf)->len;
 
 	return n;
 }
@@ -160,11 +167,16 @@ int main(int argc, char **argv){
 		
 		if(((Header)buf)->n_seq - ack > win){
 			printf("sequence # eclipsed!\n");
+			total_duplicates++;
 			continue;
 		}
 
 		else if(((Header)buf)->n_seq != ack){
 			printf("out of sequence packet - caching...\n");
+
+			if(save.count(((Header)buf)->n_seq)){
+				total_duplicates++;
+			}
 			save[((Header)buf)->n_seq] = (char*)memcpy(malloc(recv_len), buf, recv_len);
 		}
 
@@ -196,6 +208,10 @@ int main(int argc, char **argv){
 	}
 
 	tryrecv(s, buf, buffsize, &si_other, &slen);
+
+	fprintf(flog, "Data Received: %d bytes\n", total_data);
+	fprintf(flog, "Num data segments: %d\n", total_segments);
+	fprintf(flog, "Num duplicates: %d\n", total_duplicates);
 
 	close(s);
 	fclose(fout);
