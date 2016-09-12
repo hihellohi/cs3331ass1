@@ -18,6 +18,13 @@ static double dropchance;
 static FILE *fout;
 static timeval global;
 
+static int total_transferred;
+static int total_segments;
+static int total_dropped;
+static int total_delayed;
+static int total_retransmitted;
+static int total_duplicates;
+
 void die(std::string s){
 	perror(s.c_str());
 	exit(1);
@@ -67,6 +74,8 @@ void LogPacket(char *buf, std::string type){
 }
 
 int tryrecv(int s, char *buf, int bufsize, sockaddr_in *si_target, int us){
+	//-2 timeout -1 error else returns length of output
+
 	timeval timeout;
 	memset((char*)&timeout, 0, sizeof(timeout));
 	timeout.tv_usec = us;
@@ -102,9 +111,11 @@ int trysend(int s, char *buf, int buffsize, sockaddr *si_target, int slen){
 	if(rand()/(((double)RAND_MAX + 1)) > dropchance){
 		LogPacket(buf, "snd");
 		sendto(s, buf, buffsize, 0, si_target, slen);
+		total_segments++;
 	}
 	else {
 		LogPacket(buf, "drop");
+		total_dropped++;
 	}
 
 	return buffsize;
@@ -119,6 +130,9 @@ int make_packet(char* buf, int buffsize, unsigned int *n_seq, unsigned int ack, 
 	((Header)buf)->n_ack = ack;
 	*n_seq += ((Header)buf)->len;
 	((Header)buf)->flags = (1 << DATA);
+
+	total_transferred += ((Header)buf)->len;
+
 	return 1;
 }
 
@@ -128,6 +142,7 @@ int main(int argc, char **argv){
 		die("usage: ./sender receiver_host_ip receiver_port file.txt MWS MSS timeout pdrop seed");
 	}
 
+	// Initialisation
 	FILE *fin = fopen(argv[3], "r");
 	fout = fopen("Sender_log.txt", "w");
 	if(!fin){
@@ -161,6 +176,7 @@ int main(int argc, char **argv){
 		die("inet_aton");
 	}
 
+	// Handshake (bypasses PLD)
 	dropchance = -1;
 	unsigned int seq = rand(), ack = 0;
 
@@ -183,6 +199,7 @@ int main(int argc, char **argv){
 
 	dropchance = atof(argv[7]);
 
+	// main loop
 	std::queue<char*> q;
 
 	timeval timer;
@@ -191,6 +208,7 @@ int main(int argc, char **argv){
 	while(!q.empty() || !feof(fin)){
 
 		while(q.size() < mws && make_packet(buf, buffsize, &seq, ack, fin)){
+			// read more data from the file
 			q.push((char*)memcpy(malloc(buffsize), buf, buffsize));
 			
 			trysend(s, buf, sizeof(header) + ((Header)buf)->len, (sockaddr*)&si_other, slen);
@@ -202,9 +220,11 @@ int main(int argc, char **argv){
 
 		n = tryrecv(s, buf, buffsize, &si_other, std::max(0, timeout - get_timer(&timer)));
 		if(n == -2 && !q.empty()){
+			// timeout
 
 			printf("timeout\n");
 			trysend(s, q.front(), sizeof(header) + ((Header)q.front())->len, (sockaddr*)&si_other, slen);
+			total_retransmitted++;
 
 			set_timer(&timer);
 			continue;
@@ -212,16 +232,20 @@ int main(int argc, char **argv){
 		else if(((Header)buf)->flags & (1 << ACK)){
 
 			if(!q.empty() && ((Header)buf)->n_ack == ((Header)q.front())->n_seq){
+				// Duplicate ACK
 				if(++fast == 3){
 
 					printf("preemptive timeout\n");
 					trysend(s, q.front(), sizeof(header) + ((Header)q.front())->len, (sockaddr*)&si_other, slen);
+					total_retransmitted++;
 
 					set_timer(&timer);
 				}
+				total_duplicates++;
 			}
 
 			while(!q.empty() && ((Header)buf)->n_ack - ((Header)q.front())->n_seq - 1 < mss * mws){
+				// Successful ACK
 				fast = 0;
 				set_timer(&timer);
 
@@ -234,6 +258,7 @@ int main(int argc, char **argv){
 		}
 	}
 
+	// Teardown (bypasses PLD)
 	dropchance = -1;
 
 	memset(buf, 0, buffsize);
@@ -251,6 +276,13 @@ int main(int argc, char **argv){
 	((Header)buf)->flags = 1 << ACK;
 
 	trysend(s, buf, sizeof(header), (sockaddr*)&si_other, slen);
+
+	fprintf(fout, "Data Transferred: %d bytes\n", total_transferred);
+	fprintf(fout, "Num data segments: %d\n", total_segments);
+	fprintf(fout, "Num segments dropped: %d\n", total_dropped);
+	fprintf(fout, "Num segments delayed: %d\n", total_delayed);
+	fprintf(fout, "Num segments retransmitted: %d\n", total_retransmitted);
+	fprintf(fout, "Num duplicate acks: %d\n", total_duplicates);
 
 	close(s);
 	fclose(fin);
