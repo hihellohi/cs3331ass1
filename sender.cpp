@@ -7,7 +7,6 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <arpa/inet.h>
-//#include <netinet/in.h>
 
 #include <queue>
 #include <string>
@@ -16,13 +15,58 @@
 #include "header.h"
 
 static double dropchance;
+static FILE *fout;
+static timeval global;
 
 void die(std::string s){
 	perror(s.c_str());
 	exit(1);
 }
 
-int tryrecv(int s, char *buf, int bufsize, sockaddr *si_target, int *slen, int us){
+void set_timer(timeval *tv){
+	gettimeofday(tv, 0);
+}
+
+int get_timer(timeval *tv){
+	timeval tmp;
+	gettimeofday(&tmp, 0);
+	int now = tmp.tv_sec * 1000 + tmp.tv_usec / 1000;
+	int before = tv->tv_sec * 1000 + tv->tv_usec / 1000;
+	int out = now - before;
+	if(out < 0){
+		out += 24 * 3600000;
+	}
+	return out;
+}
+
+void LogPacket(char *buf, std::string type){
+	char flags[5];
+	int tmp = 0;
+
+	if(((Header)buf)->flags & 1 << SYN){
+		flags[tmp++] = 'S';
+	}
+	if(((Header)buf)->flags & 1 << FIN){
+		flags[tmp++] = 'F';
+	}
+	if(((Header)buf)->flags & 1 << DATA){
+		flags[tmp++] = 'D';
+	}
+	if(((Header)buf)->flags & 1 << ACK){
+		flags[tmp++] = 'A';
+	}
+	flags[tmp] = 0;
+
+	fprintf(fout, "%s\t%d\t%s\t%u\t%u\t%u\n", 
+			type.c_str(),
+			get_timer(&global), 
+			flags, 
+			((Header)buf)->n_seq, 
+			((Header)buf)->len, 
+			((Header)buf)->n_ack);
+}
+
+int tryrecv(int s, char *buf, int bufsize, sockaddr_in *si_target, int us){
 	timeval timeout;
 	memset((char*)&timeout, 0, sizeof(timeout));
 	timeout.tv_usec = us;
@@ -42,59 +86,59 @@ int tryrecv(int s, char *buf, int bufsize, sockaddr *si_target, int *slen, int u
 
 	memset(buf, 0, bufsize);
 
-	return recvfrom(s, buf, bufsize, 0, si_target, (unsigned int*)slen);
+	n = recvfrom(s, buf, bufsize, 0, NULL, NULL);
+	LogPacket(buf, "rcv");
+	printf("Received ACK #%u from %s:%d\n", 
+			((Header)buf)->n_ack, 
+			inet_ntoa(si_target->sin_addr), 
+			ntohs(si_target->sin_port));
+
+	return n;
 }
 
 int trysend(int s, char *buf, int buffsize, sockaddr *si_target, int slen){
+
 	printf("sending packet #%u\n", ((Header)buf)->n_seq);
 	if(rand()/(((double)RAND_MAX + 1)) > dropchance){
+		LogPacket(buf, "snd");
 		sendto(s, buf, buffsize, 0, si_target, slen);
 	}
+	else {
+		LogPacket(buf, "drop");
+	}
+
 	return buffsize;
 }
 
-int make_packet(char* buf, int buffsize, unsigned int *n_seq, FILE *fin) {
+int make_packet(char* buf, int buffsize, unsigned int *n_seq, unsigned int ack, FILE *fin) {
 
 	memset(buf, 0, buffsize);
 
 	if(!(((Header)buf)->len = fread(buf + sizeof(header), 1, buffsize - sizeof(header), fin))) return 0;
 	((Header)buf)->n_seq = *n_seq;
+	((Header)buf)->n_ack = ack;
 	*n_seq += ((Header)buf)->len;
 	((Header)buf)->flags = (1 << DATA);
 	return 1;
 }
 
-void set_timer(timeval *tv){
-	gettimeofday(tv, 0);
-}
-
-int get_timer(timeval *tv){
-	timeval tmp;
-	gettimeofday(&tmp, 0);
-	int now = tmp.tv_sec * 1000 + tmp.tv_usec / 1000;
-	int before = tv->tv_sec * 1000 + tv->tv_usec / 1000;
-	int out = now - before;
-	if(out < 0){
-		out += 24 * 3600000;
-	}
-	return out;
-}
-
 int main(int argc, char **argv){
 
 	if(argc != 9){
-		die("args");
+		die("usage: ./sender receiver_host_ip receiver_port file.txt MWS MSS timeout pdrop seed");
 	}
 
 	FILE *fin = fopen(argv[3], "r");
+	fout = fopen("Sender_log.txt", "w");
 	if(!fin){
 		die("fopen");
 	}
 
-	int mws = atoi(argv[4]);
-	int mss = atoi(argv[5]);
+	set_timer(&global);
+
+	unsigned int mws = atoi(argv[4]);
+	unsigned int mss = atoi(argv[5]);
 	int timeout = atoi(argv[6]) * 1000;
-	dropchance = atof(argv[7]);
 	srand(atoi(argv[8]));
 
 	sockaddr_in si_other;
@@ -117,15 +161,36 @@ int main(int argc, char **argv){
 		die("inet_aton");
 	}
 
+	dropchance = -1;
+	unsigned int seq = rand(), ack = 0;
+
+	memset(buf, 0, buffsize);
+	((Header)buf)->n_ack = mss;
+	((Header)buf)->n_seq = seq++;
+	((Header)buf)->size = mss * mws; 	
+	((Header)buf)->flags = 1 << SYN;
+
+	trysend(s, buf, sizeof(header), (sockaddr*)&si_other, slen);
+	tryrecv(s, buf, buffsize, &si_other, RAND_MAX);
+	ack = ((Header)buf)->n_seq + 1;
+
+	memset(buf, 0, buffsize);
+	((Header)buf)->n_ack = ack;
+	((Header)buf)->n_seq = seq;
+	((Header)buf)->flags = 1 << ACK;
+
+	trysend(s, buf, sizeof(header), (sockaddr*)&si_other, slen);
+
+	dropchance = atof(argv[7]);
+
 	std::queue<char*> q;
-	unsigned int seq = 0;
 
 	timeval timer;
 	int fast = 0;
 
 	while(!q.empty() || !feof(fin)){
 
-		while((int)q.size() < mws && make_packet(buf, buffsize, &seq, fin)){
+		while(q.size() < mws && make_packet(buf, buffsize, &seq, ack, fin)){
 			q.push((char*)memcpy(malloc(buffsize), buf, buffsize));
 			
 			trysend(s, buf, sizeof(header) + ((Header)buf)->len, (sockaddr*)&si_other, slen);
@@ -135,8 +200,8 @@ int main(int argc, char **argv){
 			}
 		}
 
-		n = tryrecv(s, buf, buffsize, (sockaddr*)&si_other, &slen, std::max(0, timeout - get_timer(&timer)));
-		if(n == -2){
+		n = tryrecv(s, buf, buffsize, &si_other, std::max(0, timeout - get_timer(&timer)));
+		if(n == -2 && !q.empty()){
 
 			printf("timeout\n");
 			trysend(s, q.front(), sizeof(header) + ((Header)q.front())->len, (sockaddr*)&si_other, slen);
@@ -145,10 +210,6 @@ int main(int argc, char **argv){
 			continue;
 		}
 		else if(((Header)buf)->flags & (1 << ACK)){
-			printf("Received ACK #%u from %s:%d\n", 
-					((Header)buf)->n_ack, 
-					inet_ntoa(si_other.sin_addr), 
-					ntohs(si_other.sin_port));
 
 			if(!q.empty() && ((Header)buf)->n_ack == ((Header)q.front())->n_seq){
 				if(++fast == 3){
@@ -160,7 +221,7 @@ int main(int argc, char **argv){
 				}
 			}
 
-			while(!q.empty() && ((Header)buf)->n_ack > ((Header)q.front())->n_seq){
+			while(!q.empty() && ((Header)buf)->n_ack - ((Header)q.front())->n_seq - 1 < mss * mws){
 				fast = 0;
 				set_timer(&timer);
 
@@ -169,20 +230,31 @@ int main(int argc, char **argv){
 			}
 
 			fflush(stdout);
+			fflush(fout);
 		}
 	}
 
-	do{
-		memset(buf, 0, buffsize);
-		((Header)buf)->n_seq = seq;
-		((Header)buf)->flags = 1 << FIN;
+	dropchance = -1;
 
-		trysend(s, buf, sizeof(header), (sockaddr*)&si_other, slen);
-		n = tryrecv(s, buf, buffsize, (sockaddr*)&si_other, &slen, timeout);
-	}while(!(n != -2 && ((Header)buf)->n_ack == seq + 1 && ((Header)buf)->flags & (1 << ACK)));
+	memset(buf, 0, buffsize);
+	((Header)buf)->n_ack = ack;
+	((Header)buf)->n_seq = seq++;
+	((Header)buf)->flags = 1 << FIN;
+
+	trysend(s, buf, sizeof(header), (sockaddr*)&si_other, slen);
+	n = tryrecv(s, buf, buffsize, &si_other, RAND_MAX);
+	ack = ((Header)buf)->n_seq + 1;
+
+	memset(buf, 0, buffsize);
+	((Header)buf)->n_ack = ack;
+	((Header)buf)->n_seq = seq;
+	((Header)buf)->flags = 1 << ACK;
+
+	trysend(s, buf, sizeof(header), (sockaddr*)&si_other, slen);
 
 	close(s);
 	fclose(fin);
+	fclose(fout);
 	free(buf);
 
 	return 0;
