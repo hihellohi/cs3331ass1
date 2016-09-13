@@ -241,6 +241,7 @@ int main(int argc, char **argv){
 
 	tryrecv(s, buf, buffsize, &si_other, RAND_MAX);
 	ertt += get_timer(&global);
+	drtt = ertt >> 1;
 
 	ack = ((Header)buf)->n_seq + 1;
 
