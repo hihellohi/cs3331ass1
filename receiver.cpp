@@ -27,7 +27,7 @@ static int total_duplicates;
 FILE *flog;
 
 void die(std::string s){
-	perror(s.c_str());
+	fprintf(stderr, "%s\n", s.c_str());
 	exit(1);
 }
 
