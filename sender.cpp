@@ -12,10 +12,16 @@
 #include <utility>
 #include <string>
 #include <algorithm>
+#include <map>
 
 #include "header.h"
 
+#define ALPHA 0.125
+#define BETA 0.25
+
 static double dropchance;
+static double delaychance;
+static int maxdelay;
 static FILE *fout;
 static timeval global;
 
@@ -25,6 +31,11 @@ static int total_dropped;
 static int total_delayed;
 static int total_retransmitted;
 static int total_duplicates;
+
+static std::priority_queue< 
+	std::pair<int, char*>,
+	std::vector<std::pair<int, char*> >,
+	std::greater<std::pair<int, char*> > > pq;
 
 void die(std::string s){
 	perror(s.c_str());
@@ -110,7 +121,15 @@ int trysend(int s, char *buf, int buffsize, sockaddr *si_target, int slen){
 	printf("sending packet #%u\n", ((Header)buf)->n_seq);
 	if(rand()/(((double)RAND_MAX + 1)) > dropchance){
 		LogPacket(buf, "snd");
-		sendto(s, buf, buffsize, 0, si_target, slen);
+
+		if(rand()/(((double)RAND_MAX + 1)) < delaychance){
+			total_delayed++;
+			pq.push(std::make_pair(
+						get_timer(&global) + (rand() % maxdelay),
+						(char*)memcpy(malloc(buffsize), buf, buffsize)));
+		}else{
+			sendto(s, buf, buffsize, 0, si_target, slen);
+		}
 		total_segments++;
 	}
 	else {
@@ -119,6 +138,20 @@ int trysend(int s, char *buf, int buffsize, sockaddr *si_target, int slen){
 	}
 
 	return buffsize;
+}
+
+void sendpackets(int s, sockaddr *si_target, int slen) {
+	while(!pq.empty() && pq.top().first < get_timer(&global)){
+		sendto(s, pq.top().second, sizeof(header) + ((Header)pq.top().second)->len, 0, si_target, slen);
+		free(pq.top().second);
+		pq.pop();
+	}
+}
+
+void flushpq(int s, sockaddr *si_target, int slen){
+	while(!pq.empty()){
+		sendpackets(s, (sockaddr*)si_target, slen);
+	}
 }
 
 int make_packet(char* buf, int buffsize, unsigned int *n_seq, unsigned int ack, FILE *fin) {
@@ -138,8 +171,8 @@ int make_packet(char* buf, int buffsize, unsigned int *n_seq, unsigned int ack, 
 
 int main(int argc, char **argv){
 
-	if(argc != 9){
-		die("usage: ./sender receiver_host_ip receiver_port file.txt MWS MSS timeout pdrop seed");
+	if(argc != 11){
+		die("usage: sender receiver_host_ip receiver_port file.txt MWS MSS timeout pdrop pdelay Maxdelay seed");
 	}
 
 	// Initialisation
@@ -154,7 +187,9 @@ int main(int argc, char **argv){
 	unsigned int mws = atoi(argv[4]);
 	unsigned int mss = atoi(argv[5]);
 	int timeout = atoi(argv[6]);
-	srand(atoi(argv[8]));
+	delaychance = atof(argv[8]);
+	maxdelay = atoi(argv[9]);
+	srand(atoi(argv[10]));
 
 	sockaddr_in si_other;
 
@@ -187,6 +222,9 @@ int main(int argc, char **argv){
 	((Header)buf)->flags = 1 << SYN;
 
 	trysend(s, buf, sizeof(header), (sockaddr*)&si_other, slen);
+
+	flushpq(s, (sockaddr*)&si_other, slen);
+
 	tryrecv(s, buf, buffsize, &si_other, RAND_MAX);
 	ack = ((Header)buf)->n_seq + 1;
 
@@ -201,10 +239,6 @@ int main(int argc, char **argv){
 
 	// main loop
 	std::queue<char*> q;
-	std::priority_queue< 
-		std::pair<int, char*>,
-		std::vector<std::pair<int, char*> >,
-		std::greater<std::pair<int, char*> > > pq;
 
 	timeval timer;
 	int fast = 0;
@@ -222,11 +256,7 @@ int main(int argc, char **argv){
 			}
 		}
 
-		while(!pq.empty() && pq.top().first < get_timer(&global)){
-			trysend(s, pq.top().second, sizeof(header) + ((Header)pq.top().second)->len, (sockaddr*)&si_other, slen);
-			free(pq.top().second);
-			pq.pop();
-		}
+		sendpackets(s, (sockaddr*)&si_other, slen);
 
 		int t = std::max(0, timeout - get_timer(&timer));
 
@@ -285,6 +315,9 @@ int main(int argc, char **argv){
 	((Header)buf)->flags = 1 << FIN;
 
 	trysend(s, buf, sizeof(header), (sockaddr*)&si_other, slen);
+
+	flushpq(s, (sockaddr*)&si_other, slen);
+
 	n = tryrecv(s, buf, buffsize, &si_other, RAND_MAX);
 	ack = ((Header)buf)->n_seq + 1;
 
@@ -294,6 +327,8 @@ int main(int argc, char **argv){
 	((Header)buf)->flags = 1 << ACK;
 
 	trysend(s, buf, sizeof(header), (sockaddr*)&si_other, slen);
+
+	flushpq(s, (sockaddr*)&si_other, slen);
 
 	fprintf(fout, "Data Transferred: %d bytes\n", total_transferred);
 	fprintf(fout, "Num data segments: %d\n", total_segments);
