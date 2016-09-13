@@ -9,6 +9,7 @@
 #include <arpa/inet.h>
 
 #include <queue>
+#include <utility>
 #include <string>
 #include <algorithm>
 
@@ -153,7 +154,7 @@ int main(int argc, char **argv){
 
 	unsigned int mws = atoi(argv[4]);
 	unsigned int mss = atoi(argv[5]);
-	int timeout = atoi(argv[6]) * 1000;
+	int timeout = atoi(argv[6]);
 	srand(atoi(argv[8]));
 
 	sockaddr_in si_other;
@@ -201,11 +202,15 @@ int main(int argc, char **argv){
 
 	// main loop
 	std::queue<char*> q;
+	std::priority_queue< 
+		std::pair<int, char*>,
+		std::vector<std::pair<int, char*> >,
+		std::greater<std::pair<int, char*> > > pq;
 
 	timeval timer;
 	int fast = 0;
 
-	while(!q.empty() || !feof(fin)){
+	while(!q.empty() || !feof(fin) || !pq.empty()){
 
 		while(q.size() < mws && make_packet(buf, buffsize, &seq, ack, fin)){
 			// read more data from the file
@@ -218,16 +223,30 @@ int main(int argc, char **argv){
 			}
 		}
 
-		n = tryrecv(s, buf, buffsize, &si_other, std::max(0, timeout - get_timer(&timer)));
-		if(n == -2 && !q.empty()){
-			// timeout
+		while(!pq.empty() && pq.top().first < get_timer(&global)){
+			trysend(s, pq.top().second, sizeof(header) + ((Header)pq.top().second)->len, (sockaddr*)&si_other, slen);
+			free(pq.top().second);
+			pq.pop();
+		}
 
-			printf("timeout\n");
-			trysend(s, q.front(), sizeof(header) + ((Header)q.front())->len, (sockaddr*)&si_other, slen);
-			total_retransmitted++;
+		int t = std::max(0, timeout - get_timer(&timer));
 
-			set_timer(&timer);
-			continue;
+		if(!pq.empty()){
+			t = std::min(t, std::max(0, pq.top().first - get_timer(&global)));
+		}
+
+		n = tryrecv(s, buf, buffsize, &si_other, t * 1000);
+		if(n == -2){
+			if(get_timer(&timer) >= timeout && !q.empty()){
+				// timeout
+
+				printf("timeout\n");
+				trysend(s, q.front(), sizeof(header) + ((Header)q.front())->len, (sockaddr*)&si_other, slen);
+				total_retransmitted++;
+
+				set_timer(&timer);
+				continue;
+			}
 		}
 		else if(((Header)buf)->flags & (1 << ACK)){
 
