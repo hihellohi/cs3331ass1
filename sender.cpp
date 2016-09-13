@@ -108,21 +108,25 @@ int tryrecv(int s, char *buf, int bufsize, sockaddr_in *si_target, int us){
 	memset(buf, 0, bufsize);
 	n = recvfrom(s, buf, bufsize, 0, NULL, NULL);
 	LogPacket(buf, "rcv");
-	printf("Received ACK #%u from %s:%d\n", 
-			((Header)buf)->n_ack, 
-			inet_ntoa(si_target->sin_addr), 
-			ntohs(si_target->sin_port));
+//	printf("Received ACK #%u from %s:%d\n", 
+//			((Header)buf)->n_ack, 
+//			inet_ntoa(si_target->sin_addr), 
+//			ntohs(si_target->sin_port));
 
 	return n;
 }
 
 int trysend(int s, char *buf, int buffsize, sockaddr *si_target, int slen){
 
-	printf("sending packet #%u\n", ((Header)buf)->n_seq);
+	//printf("sending packet #%u\n", ((Header)buf)->n_seq);
+
 	if(rand()/(((double)RAND_MAX + 1)) > dropchance){
+		//drop
 
 		if(rand()/(((double)RAND_MAX + 1)) < delaychance){
-			LogPacket(buf, "buf");
+			//delay
+			
+			LogPacket(buf, "dly");
 			total_delayed++;
 			pq.push(std::make_pair(
 						get_timer(&global) + (rand() % maxdelay),
@@ -143,7 +147,7 @@ int trysend(int s, char *buf, int buffsize, sockaddr *si_target, int slen){
 
 void sendpackets(int s, sockaddr *si_target, int slen) {
 	while(!pq.empty() && pq.top().first < get_timer(&global)){
-		LogPacket(pq.top().second, "buf");
+		LogPacket(pq.top().second, "snd");
 		sendto(s, pq.top().second, sizeof(header) + ((Header)pq.top().second)->len, 0, si_target, slen);
 		free(pq.top().second);
 		pq.pop();
@@ -161,20 +165,22 @@ int make_packet(char* buf, int buffsize, unsigned int *n_seq, unsigned int ack, 
 	memset(buf, 0, buffsize);
 
 	if(!(((Header)buf)->len = fread(buf + sizeof(header), 1, buffsize - sizeof(header), fin))) return 0;
+
 	((Header)buf)->n_seq = *n_seq;
 	((Header)buf)->n_ack = ack;
 	*n_seq += ((Header)buf)->len;
 	((Header)buf)->flags = (1 << DATA);
-
 	total_transferred += ((Header)buf)->len;
 
 	return 1;
 }
 
 static int ertt, drtt, gamma;
+static std::map<unsigned int, int> m;
+static int timedout;
 
 int get_timeout(){
-	return ertt + gamma * drtt;
+	return std::max(1,(ertt + gamma * drtt) << timedout);
 }
 
 void set_timeout(int rtt){
@@ -185,7 +191,7 @@ void set_timeout(int rtt){
 int main(int argc, char **argv){
 
 	if(argc != 11){
-		die("usage: sender receiver_host_ip receiver_port file.txt MWS MSS timeout pdrop pdelay Maxdelay seed");
+		die("usage: sender receiver_host_ip receiver_port file.txt MWS MSS gamma pdrop pdelay Maxdelay seed");
 	}
 
 	// Initialisation
@@ -242,6 +248,7 @@ int main(int argc, char **argv){
 	tryrecv(s, buf, buffsize, &si_other, RAND_MAX);
 	ertt += get_timer(&global);
 	drtt = ertt >> 1;
+	timedout = 0;
 
 	ack = ((Header)buf)->n_seq + 1;
 
@@ -265,6 +272,7 @@ int main(int argc, char **argv){
 		while(q.size() < mws && make_packet(buf, buffsize, &seq, ack, fin)){
 			// read more data from the file
 			q.push((char*)memcpy(malloc(buffsize), buf, buffsize));
+			m[((Header)buf)->n_seq] = get_timer(&global);
 			
 			trysend(s, buf, sizeof(header) + ((Header)buf)->len, (sockaddr*)&si_other, slen);
 
@@ -275,6 +283,7 @@ int main(int argc, char **argv){
 
 		sendpackets(s, (sockaddr*)&si_other, slen);
 
+		// get timeout length
 		int timeout = get_timeout();
 		int t = std::max(0, timeout - get_timer(&timer));
 
@@ -283,16 +292,17 @@ int main(int argc, char **argv){
 		}
 
 		n = tryrecv(s, buf, buffsize, &si_other, t * 1000);
+
 		if(n == -2){
 			if(get_timer(&timer) >= timeout && !q.empty()){
 				// timeout
 
-				printf("timeout\n");
+				//printf("timeout\n");
 				trysend(s, q.front(), sizeof(header) + ((Header)q.front())->len, (sockaddr*)&si_other, slen);
 				total_retransmitted++;
+				timedout = 1;
 
 				set_timer(&timer);
-				continue;
 			}
 		}
 		else if(((Header)buf)->flags & (1 << ACK)){
@@ -301,7 +311,7 @@ int main(int argc, char **argv){
 				// Duplicate ACK
 				if(++fast == 3){
 
-					printf("preemptive timeout\n");
+					//printf("preemptive timeout\n");
 					trysend(s, q.front(), sizeof(header) + ((Header)q.front())->len, (sockaddr*)&si_other, slen);
 					total_retransmitted++;
 
@@ -310,17 +320,29 @@ int main(int argc, char **argv){
 				total_duplicates++;
 			}
 
-			while(!q.empty() && ((Header)buf)->n_ack - ((Header)q.front())->n_seq - 1 < mss * mws){
-				// Successful ACK
+			else{
+				while(!q.empty() && ((Header)buf)->n_ack - ((Header)q.front())->n_seq - 1 < mss * mws){
+					// Successful ACK
+					set_timer(&timer);
+
+					std::map<unsigned int, int>::iterator it = m.find(((Header)q.front())->n_seq);
+					if(it != m.end()){
+						if(!timedout && fast < 3 && it->first + ((Header)q.front())->len == ((Header)buf)->n_ack){
+							set_timeout(get_timer(&global) - it->second);
+							//printf("%d, %d, %d\n", ertt, drtt, timeout);
+						}
+						m.erase(it);
+					}
+
+					free(q.front());
+					q.pop();
+				}
+
 				fast = 0;
-				set_timer(&timer);
-
-				free(q.front());
-				q.pop();
+				timedout = 0;
+				fflush(stdout);
+				fflush(fout);
 			}
-
-			fflush(stdout);
-			fflush(fout);
 		}
 	}
 
