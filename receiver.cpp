@@ -165,10 +165,12 @@ int main(int argc, char **argv){
 
 		recv_len = tryrecv(s, buf, buffsize, &si_other, (unsigned int*)&slen);
 		
-		if(((Header)buf)->n_seq - ack > win){
+		if(((Header)buf)->flags & 1 << ACK){
+			continue;
+		}
+		else if(((Header)buf)->n_seq - ack > win){
 			printf("sequence # eclipsed!\n");
 			total_duplicates++;
-			continue;
 		}
 
 		else if(((Header)buf)->n_seq != ack){
@@ -195,8 +197,6 @@ int main(int argc, char **argv){
 			finished = true;
 			seq++;
 			ack++;
-		}else if(((Header)buf)->flags & 1 << ACK){
-			continue;
 		}
 
 		make_ack(buf, ack, seq, finished);
