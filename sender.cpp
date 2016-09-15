@@ -141,7 +141,7 @@ int trysend(int s, char *buf, int buffsize, sockaddr *si_target, int slen){
 
 void sendpackets(int s, sockaddr *si_target, int slen) {
 	while(!pq.empty() && pq.top().first < get_timer(&global)){
-		LogPacket(pq.top().second, "snd");
+		LogPacket(pq.top().second, "dsnd");
 		sendto(s, pq.top().second, sizeof(header) + ((Header)pq.top().second)->len, 0, si_target, slen);
 		free(pq.top().second);
 		pq.pop();
@@ -329,6 +329,7 @@ int main(int argc, char **argv){
 					std::map<unsigned int, int>::iterator it = m.find(((Header)q.front())->n_seq);
 					if(it != m.end()){
 						if(!timedout && fast < 3 && it->first + ((Header)q.front())->len == ((Header)buf)->n_ack){
+							printf("%d %d %d\n", ertt, drtt, timeout);
 							set_timeout(get_timer(&global) - it->second);
 						}
 						m.erase(it);
