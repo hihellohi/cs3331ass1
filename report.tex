@@ -1,0 +1,93 @@
+\documentclass[a4paper]{article}
+
+\usepackage[english]{babel}
+\usepackage[UKenglish]{isodate}
+\usepackage[parfill]{parskip}
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{csquotes}
+\usepackage{listings}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{enumerate}
+\usepackage{siunitx}
+
+\newcommand{\nth}{\textsuperscript}
+
+\title{Assignment 1 Report}
+\author{Kevin Zihong Ni\\\texttt{z5025098}}
+
+\begin{document}
+
+\maketitle
+
+\section{Design Overview}
+
+Both the sender and the receiver of my implementation of STP was written in C++ (as authorised by the lecturer Apro S. Kanhere
+over email). I chose to do this as C++, unlike C offers the standard template library, allowing the use of data structures such as
+maps and queues which would have required significant amounts of time investment to implement on my own. The code does 
+\textbf{not} require a C++11 compiler.
+
+\subsection{Sender}
+The sender keeps a queue of segments that have been sent but have yet to be acked. This queue is never greater than the maximum
+window size and is "replenished" from the input file whenever its size falls below the maximum (unless the EOF has been reached).
+Whenever an ack is received, segments are popped off the front of the queue until the sequence number of the
+next packet is no longer greater than the ack number of the received acknowledgement. If the ack number is equal to the segment
+at the front of the queue (before any popping), the duplicate ack counter is incremented. When this counter reaches 3, or if the
+timeout period expires, the packet at the front of the queue is retransmitted.
+
+\subsection{Receiver}
+The receiver continuously listens for incoming data on the given socket. It keeps track of the lowest sequence number that it has
+yet to receive. An acknowledgment packet with this number is sent every time a data packet is received.
+If a received packet has sequence number less than this number, it just throws it away as it already has that
+data, making it a duplicate. If it is greater, then it caches the packet into a map, indexing it by its sequence number.
+if it is equal to the number, then it increments the number by the length of the received packet and searches the map
+for a packet that has a sequence number equal to the new number. It repeats this until no such packet exists in the map.
+
+\subsection{Extension}
+The delay module of the extension was implemented with the use of a min priority queue. Whenever a packet was delayed, it was 
+pushed onto the priority queue with the current time in milliseconds plus a random constant. Whenever the current time was greater
+than the priority of the next item of the priority queue, the item was sent and popped off the priority queue.
+
+The estimation module of the extension was implemented using a map. Whenever a segment was "sent", its sequence number and a 
+timestamp was recorded into a map. If a retransmission occured, a flag was set that would only be reset on a successful ack.
+If the flag was not set, then the current time was used to recalculate the estimations whenever an acknowledgment was received.
+
+\subsection{Features}
+The list of successfully implemented features is as follows:
+\begin{itemize}
+	\item Successful reliable transmission of a file.
+	\item Three way handshake (SYN, SYNACK, ACK) to establish connection. It is assumed that this is always received by the
+		receiver (as per the specifications). This \textbf{can} be delayed.
+	\item Randomized starting sequence number. Can handle integer overflows. Greater than and less than defined by window size.
+	\item Four way termination (FIN, ACK, FIN, ACK). The middle two packets were combined into one (as per the example given in
+		the specifications). Like the handshake packets, these may be delayed but never dropped.
+	\item Single timer for timeout operation for sender.
+	\item Fast retransmit after 3 duplicate acks.
+	\item Both sequence number and acknowledgement number included in header.
+	\item Sender takes in maximum segment size and maximum window size as input.
+	\item PLD module randomly drops and delays packets with chances and maximum delay given as input.
+	\item Dynamic timeout calculated from sample RTTs. (This has a floor of 1ms because 0ms resulted in timeouts happening
+		constantly resulting in significant amounts of natural packet loss due to the sheer volume of UDP datagrams being sent)
+\end{itemize}
+
+\section{STP Header}
+\lstinputlisting[language=C, caption=STP Header Struct Definition]{header.h}
+\begin{table}[H]
+\centering
+\caption{STP Header Field Descriptions}
+\label{header}
+\begin{tabular}{@{}llp{0.8\textwidth}@{}}
+\toprule
+Field & Bytes & Description \\ \midrule
+\verb|n_seq| & 4 & Contains the sequence number  of the segment. Byte-stream oriented, meaning that the sequence number reflects the index of the first data byte instead of the index of the packet. \\
+\verb|n_ack| & 4 & Contains the acknowledgement number when sending an acknowledgement packet. Is also used to communicate the maximum segment size during the handshake. \\
+\verb|len| & 4 & The length of the data packet (excluding header) in bytes. \\
+\verb|size| & 4 & Only used during handshake. Contains the size of the window in bytes (necessary to handle sequence number overflows). \\
+\verb|flags| & 1 & Indicates whether the segment is a SYN, FIN, ACK and/or DATA segment. \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\section{Extension Questions}
+
+\end{document}
