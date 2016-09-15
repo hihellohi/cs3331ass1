@@ -109,17 +109,11 @@ int tryrecv(int s, char *buf, int bufsize, sockaddr_in *si_target, int us){
 
 	n = recvfrom(s, buf, bufsize, 0, NULL, NULL);
 	LogPacket(buf, "rcv");
-	printf("Received ACK #%u from %s:%d\n", 
-			((Header)buf)->n_ack, 
-			inet_ntoa(si_target->sin_addr), 
-			ntohs(si_target->sin_port));
 
 	return n;
 }
 
 int trysend(int s, char *buf, int buffsize, sockaddr *si_target, int slen){
-
-	printf("sending packet #%u\n", ((Header)buf)->n_seq);
 
 	if(rand()/(((double)RAND_MAX + 1)) > dropchance){
 		//drop
@@ -307,7 +301,6 @@ int main(int argc, char **argv){
 			if(get_timer(&timer) >= timeout && !q.empty()){
 				// timeout
 
-				printf("timeout\n");
 				trysend(s, q.front(), sizeof(header) + ((Header)q.front())->len, (sockaddr*)&si_other, slen);
 				total_retransmitted++;
 				timedout = 1;
@@ -321,7 +314,6 @@ int main(int argc, char **argv){
 				// Duplicate ACK
 				if(++fast == 3){
 
-					printf("preemptive timeout\n");
 					trysend(s, q.front(), sizeof(header) + ((Header)q.front())->len, (sockaddr*)&si_other, slen);
 					total_retransmitted++;
 
@@ -350,7 +342,6 @@ int main(int argc, char **argv){
 				fast = 0;
 				timedout = 0;
 				fflush(fout);
-				fflush(stdout);
 			}
 		}
 	}
