@@ -79,10 +79,6 @@ int tryrecv(int s, char *buf, int bufsize, sockaddr_in *si_target, int *slen){
 	memset(buf, 0, bufsize);
 	int n = recvfrom(s, buf, bufsize, 0, (sockaddr*)si_target, slen);
 	LogPacket(buf, "rcv");
-	printf("Received packet #%u from %s:%d\n", 
-			((Header)buf)->n_seq, 
-			inet_ntoa(si_target->sin_addr), 
-			ntohs(si_target->sin_port));
 
 	total_segments++;
 	total_data += ((Header)buf)->len;
@@ -92,7 +88,6 @@ int tryrecv(int s, char *buf, int bufsize, sockaddr_in *si_target, int *slen){
 
 int trysend(int s, char *buf, int buffsize, sockaddr *si_target, int slen){
 
-	printf("sending ACK #%u\n", ((Header)buf)->n_ack);
 	LogPacket(buf, "snd");
 	sendto(s, buf, buffsize, 0, si_target, slen);
 
@@ -169,12 +164,10 @@ int main(int argc, char **argv){
 			continue;
 		}
 		else if(((Header)buf)->n_seq - ack > win){
-			printf("sequence # eclipsed!\n");
 			total_duplicates++;
 		}
 
 		else if(((Header)buf)->n_seq != ack){
-			printf("out of sequence packet - caching...\n");
 
 			if(save.count(((Header)buf)->n_seq)){
 				total_duplicates++;
@@ -205,7 +198,6 @@ int main(int argc, char **argv){
 
 		fflush(fout);
 		fflush(flog);
-		fflush(stdout);
 	}
 
 	tryrecv(s, buf, buffsize, &si_other, &slen);
