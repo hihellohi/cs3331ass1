@@ -61,18 +61,32 @@ The list of successfully implemented features is as follows:
 		receiver (as per the specifications). This \textbf{can} be delayed.
 	\item Randomized starting sequence number. Can handle integer overflows. Greater than and less than defined by window size.
 	\item Four way termination (FIN, ACK, FIN, ACK). The middle two packets were combined into one (as per the example given in
-		the specifications).
+		the specifications). Like the handshake packets, these may be delayed but never dropped.
 	\item Single timer for timeout operation for sender.
 	\item Fast retransmit after 3 duplicate acks.
 	\item Both sequence number and acknowledgement number included in header.
 	\item Sender takes in maximum segment size and maximum window size as input.
-	\item PLD module randomly drops packets with chance given as input.
-	\item PLD module randomly delays packets with chance and maximum delay given as input.
+	\item PLD module randomly drops and delays packets with chances and maximum delay given as input.
 	\item Dynamic timeout calculated from sample RTTs. (This has a floor of 1ms because 0ms resulted in timeouts happening
 		constantly resulting in significant amounts of natural packet loss due to the sheer volume of UDP datagrams being sent)
 \end{itemize}
 
 \section{STP Header}
+\lstinputlisting[language=C, caption=STP Header Struct Definition]{header.h}
+\begin{table}[H]
+\centering
+\caption{STP Header Field Descriptions}
+\label{header}
+\begin{tabular}{@{}llp{0.8\textwidth}@{}}
+\toprule
+Field & Bytes & Description \\ \midrule
+\verb|n_seq| & 4 & Contains the sequence number  of the segment. Byte-stream oriented, meaning that the sequence number reflects the index of the first data byte instead of the index of the packet. \\
+\verb|n_ack| & 4 & Contains the acknowledgement number when sending an acknowledgement packet. Is also used to communicate the maximum segment size during the handshake. \\
+\verb|len| & 4 & The length of the data packet (excluding header) in bytes. \\
+\verb|size| & 4 & Only used during handshake. Contains the size of the window in bytes (necessary to handle sequence number overflows). \\
+\verb|flags| & 1 & Indicates whether the segment is a SYN, FIN, ACK and/or DATA segment. \\ \bottomrule
+\end{tabular}
+\end{table}
 
 \section{Extension Questions}
 
