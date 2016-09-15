@@ -203,8 +203,9 @@ int main(int argc, char **argv){
 
 		trysend(s, buf, sizeof(header), (sockaddr*)&si_other, slen);
 
-		fflush(stdout);
 		fflush(fout);
+		fflush(flog);
+		fflush(stdout);
 	}
 
 	tryrecv(s, buf, buffsize, &si_other, (unsigned int*)&slen);

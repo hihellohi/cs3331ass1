@@ -109,17 +109,17 @@ int tryrecv(int s, char *buf, int bufsize, sockaddr_in *si_target, int us){
 
 	n = recvfrom(s, buf, bufsize, 0, NULL, NULL);
 	LogPacket(buf, "rcv");
-//	printf("Received ACK #%u from %s:%d\n", 
-//			((Header)buf)->n_ack, 
-//			inet_ntoa(si_target->sin_addr), 
-//			ntohs(si_target->sin_port));
+	printf("Received ACK #%u from %s:%d\n", 
+			((Header)buf)->n_ack, 
+			inet_ntoa(si_target->sin_addr), 
+			ntohs(si_target->sin_port));
 
 	return n;
 }
 
 int trysend(int s, char *buf, int buffsize, sockaddr *si_target, int slen){
 
-	//printf("sending packet #%u\n", ((Header)buf)->n_seq);
+	printf("sending packet #%u\n", ((Header)buf)->n_seq);
 
 	if(rand()/(((double)RAND_MAX + 1)) > dropchance){
 		//drop
@@ -161,11 +161,11 @@ void flushpq(int s, sockaddr *si_target, int slen){
 	}
 }
 
-int make_packet(char* buf, int buffsize, unsigned int *n_seq, unsigned int ack, FILE *fin) {
+int make_packet(char* buf, int buffsize, int len, unsigned int *n_seq, unsigned int ack, FILE *fin) {
 
 	memset(buf, 0, buffsize);
 
-	if(!(((Header)buf)->len = fread(buf + sizeof(header), 1, buffsize - sizeof(header), fin))) return 0;
+	if(!(((Header)buf)->len = fread(buf + sizeof(header), 1, len, fin))) return 0;
 
 	((Header)buf)->n_seq = *n_seq;
 	((Header)buf)->n_ack = ack;
@@ -239,7 +239,7 @@ int main(int argc, char **argv){
 	memset(buf, 0, buffsize);
 	((Header)buf)->n_ack = mss;
 	((Header)buf)->n_seq = seq++;
-	((Header)buf)->size = mss * mws; 	
+	((Header)buf)->size = mws; 	
 	((Header)buf)->flags = 1 << SYN;
 
 	trysend(s, buf, sizeof(header), (sockaddr*)&si_other, slen);
@@ -270,7 +270,16 @@ int main(int argc, char **argv){
 
 	while(!q.empty() || !feof(fin) || !pq.empty()){
 
-		while(q.size() < mws && make_packet(buf, buffsize, &seq, ack, fin)){
+		while((q.empty() || seq - ((Header)q.front())->n_seq < mws) && 
+				make_packet(
+					buf, 
+					buffsize, 
+					std::min(mss, (q.empty() ? seq : ((Header)q.front())->n_seq) - seq + mws ), 
+					&seq, 
+					ack, 
+					fin)
+				){
+
 			// read more data from the file
 			q.push((char*)memcpy(malloc(buffsize), buf, buffsize));
 			m[((Header)buf)->n_seq] = get_timer(&global);
@@ -298,7 +307,7 @@ int main(int argc, char **argv){
 			if(get_timer(&timer) >= timeout && !q.empty()){
 				// timeout
 
-				//printf("timeout\n");
+				printf("timeout\n");
 				trysend(s, q.front(), sizeof(header) + ((Header)q.front())->len, (sockaddr*)&si_other, slen);
 				total_retransmitted++;
 				timedout = 1;
@@ -312,7 +321,7 @@ int main(int argc, char **argv){
 				// Duplicate ACK
 				if(++fast == 3){
 
-					//printf("preemptive timeout\n");
+					printf("preemptive timeout\n");
 					trysend(s, q.front(), sizeof(header) + ((Header)q.front())->len, (sockaddr*)&si_other, slen);
 					total_retransmitted++;
 
@@ -322,7 +331,7 @@ int main(int argc, char **argv){
 			}
 
 			else{
-				while(!q.empty() && ((Header)buf)->n_ack - ((Header)q.front())->n_seq - 1 < mss * mws){
+				while(!q.empty() && ((Header)buf)->n_ack - ((Header)q.front())->n_seq - 1 < mws){
 					// Successful ACK
 					set_timer(&timer);
 
@@ -330,7 +339,6 @@ int main(int argc, char **argv){
 					if(it != m.end()){
 						if(!timedout && fast < 3 && it->first + ((Header)q.front())->len == ((Header)buf)->n_ack){
 							set_timeout(get_timer(&global) - it->second);
-							//printf("%d, %d, %d\n", ertt, drtt, timeout);
 						}
 						m.erase(it);
 					}
@@ -341,8 +349,8 @@ int main(int argc, char **argv){
 
 				fast = 0;
 				timedout = 0;
-				fflush(stdout);
 				fflush(fout);
+				fflush(stdout);
 			}
 		}
 	}
